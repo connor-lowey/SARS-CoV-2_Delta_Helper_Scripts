@@ -133,11 +133,12 @@ def build_region_frame(reference_seq, start, end):
     """Map alignment columns in [start, end] to their 1-based rank among
     non-gap reference bases (the gene position with reference gaps ignored).
 
-    Used only to report the supplementary gap-excluded position columns --
-    the main codon/gene-position columns treat every alignment column,
-    gaps included, as a real nucleotide position. Gap columns map to the
-    rank of the next real base (best-effort, since an inserted base has no
-    ungapped position of its own).
+    Used to report the gap-excluded position columns, and to compute the
+    codon for non-insertion mutations against the true, ungapped reading
+    frame -- an upstream reference-gap run that isn't a multiple of 3
+    otherwise shifts raw alignment-column arithmetic out of frame. Gap
+    columns map to the rank of the next real base (best-effort, since an
+    inserted base has no ungapped position of its own).
     """
     column_to_real = {}
     real_to_column = []
@@ -150,10 +151,23 @@ def build_region_frame(reference_seq, start, end):
     return column_to_real, real_to_column
 
 
-def get_codon_context(reference_seq, start, full_position):
+def get_codon_context(reference_seq, real_to_column, real_position):
     """Return (offset, codon_positions, original_codon) for the codon containing
-    full_position, treating every alignment column -- including reference gaps
-    -- as a real nucleotide position.
+    real_position, using the ungapped reference frame so an upstream reference
+    gap run that isn't a multiple of 3 doesn't shift the codon out of frame.
+    """
+    offset = (real_position - 1) % 3
+    codon_start_index = real_position - offset
+    codon_positions = real_to_column[codon_start_index - 1: codon_start_index + 2]
+    original_codon = [BASE_TO_RNA.get(reference_seq[pos - 1].upper(), reference_seq[pos - 1].upper()) for pos in codon_positions]
+    return offset, codon_positions, original_codon
+
+
+def get_insertion_codon_context(reference_seq, start, full_position):
+    """Return (offset, codon_positions, original_codon) for an insertion's own
+    local codon, treating every alignment column -- including reference gaps
+    -- as a real nucleotide position. An insertion has no ungapped position of
+    its own, so its codon is taken from its immediate local alignment columns.
     """
     offset = (full_position - start) % 3
     codon_start = full_position - offset
@@ -341,11 +355,13 @@ def build_results(split_data, regions, all_sequences, genomes, group):
                 gene_position_nt = format_flank(before_nt, after_nt)
                 gene_position_aa = format_flank(math.ceil(before_nt / 3), math.ceil(after_nt / 3))
                 full_genome_position = format_flank(before_column, after_column)
+                offset, codon_positions, original_codon = get_insertion_codon_context(reference_seq, start, full_position)
             else:
                 real_position = column_to_real[full_position]
                 gene_position_nt = real_position
                 gene_position_aa = math.ceil(real_position / 3)
-                full_genome_position = full_position
+                full_genome_position = start - 1 + real_position  # shift full_position back by the gaps seen so far in this region
+                offset, codon_positions, original_codon = get_codon_context(reference_seq, real_to_column, real_position)
 
             for mutant_column in nonzero_columns:
                 if mutant_column == ref_column:
@@ -356,7 +372,6 @@ def build_results(split_data, regions, all_sequences, genomes, group):
                 if percentage < SIGNIFICANCE_THRESHOLD_PCT:
                     continue
 
-                offset, codon_positions, original_codon = get_codon_context(reference_seq, start, full_position)
                 codon_change = get_codon_change(all_sequences, offset, codon_positions, original_codon, mutant_column, significant_bases)
                 codon_cooccurrence = get_codon_cooccurrence(all_sequences, offset, codon_positions, original_codon, mutant_column, included, significant_bases)
                 amino_acid_change = get_amino_acid_change(codon_change)
