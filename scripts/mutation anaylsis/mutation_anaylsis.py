@@ -163,31 +163,33 @@ def get_codon_context(reference_seq, real_to_column, real_position):
     return offset, codon_positions, original_codon
 
 
-def get_insertion_codon_context(reference_seq, start, full_position):
+def get_insertion_codon_context(reference_seq, start, before_nt, before_column, full_position):
     """Return (offset, codon_positions, original_codon) for an insertion's own
-    local codon, treating every alignment column -- including reference gaps
-    -- as a real nucleotide position. An insertion has no ungapped position of
-    its own, so its codon is taken from its immediate local alignment columns.
+    local codon. The reading frame continues from the real reference codon
+    immediately preceding the insertion (before_nt/before_column), so an
+    upstream reference-gap run that isn't a multiple of 3 shifts this frame
+    exactly like it does for real (non-insertion) positions. Falls back to
+    naive local arithmetic if there's no real base before the insertion.
     """
-    offset = (full_position - start) % 3
+    if before_column is None:
+        offset = (full_position - start) % 3
+    else:
+        offset = (before_nt + (full_position - before_column - 1)) % 3
     codon_start = full_position - offset
     codon_positions = [codon_start, codon_start + 1, codon_start + 2]
     original_codon = [BASE_TO_RNA.get(reference_seq[pos - 1].upper(), reference_seq[pos - 1].upper()) for pos in codon_positions]
     return offset, codon_positions, original_codon
 
 
-def get_insertion_flanks(column_to_real, real_to_column, full_position):
-    """Return ((before_nt, after_nt), (before_column, after_column)): the
-    ungapped gene positions flanking an insertion, and the full genome
-    columns immediately bordering it. The full genome columns are always
-    adjacent (before_column, before_column + 1), ignoring how many gap
-    columns the insertion itself spans.
+def get_insertion_flanks(real_to_column, full_position, column_to_real):
+    """Return (before_nt, after_nt, before_column): the ungapped gene positions
+    flanking an insertion, and the full genome column of the real reference
+    base immediately preceding it.
     """
     after_nt = column_to_real[full_position]
     before_nt = after_nt - 1
     before_column = real_to_column[before_nt - 1] if before_nt >= 1 else None
-    after_column = before_column + 1 if before_column is not None else None
-    return (before_nt, after_nt), (before_column, after_column)
+    return before_nt, after_nt, before_column
 
 
 def format_flank(before, after):
@@ -351,11 +353,11 @@ def build_results(split_data, regions, all_sequences, genomes, group):
             alignment_gene_position_nt = full_position - start + 1  # gaps counted as real positions
 
             if ref_column == "GAP":
-                (before_nt, after_nt), (before_column, after_column) = get_insertion_flanks(column_to_real, real_to_column, full_position)
+                before_nt, after_nt, before_column = get_insertion_flanks(real_to_column, full_position, column_to_real)
                 gene_position_nt = format_flank(before_nt, after_nt)
                 gene_position_aa = format_flank(math.ceil(before_nt / 3), math.ceil(after_nt / 3))
-                full_genome_position = format_flank(before_column, after_column)
-                offset, codon_positions, original_codon = get_insertion_codon_context(reference_seq, start, full_position)
+                full_genome_position = format_flank(start - 1 + before_nt, start - 1 + after_nt)
+                offset, codon_positions, original_codon = get_insertion_codon_context(reference_seq, start, before_nt, before_column, full_position)
             else:
                 real_position = column_to_real[full_position]
                 gene_position_nt = real_position
