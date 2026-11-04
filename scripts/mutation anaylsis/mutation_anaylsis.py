@@ -4,6 +4,9 @@ from collections import Counter
 
 import pandas as pd
 
+##### TO RUN #####
+    #### python3 mutation_analysis_28Sept26.py
+
 CONFIG_PATH = "mutation_analysis_config.csv"
 SIGNIFICANCE_THRESHOLD_PCT = 1
 
@@ -217,7 +220,8 @@ def build_significant_bases(region_df):
         included = sum(int(row[col]) for col in MUTATION_COLUMNS) - 1
         bases = set()
         for col in MUTATION_COLUMNS:
-            if int(row[col]) / included * 100 >= SIGNIFICANCE_THRESHOLD_PCT:
+            # Rounded to match the reporting filter in build_results.
+            if round(int(row[col]) / included * 100, 2) >= SIGNIFICANCE_THRESHOLD_PCT:
                 bases.add(COLUMN_TO_BASE[col])
         significant[position] = bases
     return significant
@@ -416,3 +420,5 @@ if __name__ == "__main__":
 
     write_split_workbook(split_data, f"{group}_split.xlsx")
     results_df.to_excel(f"{group}_mutation_analysis.xlsx", index=False, sheet_name="Results")
+
+    print("Analysis Complete")
